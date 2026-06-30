@@ -79,7 +79,11 @@ impl RawConPty {
     }
 
     pub fn pseudoconsole_handle(&self) -> RawHandle {
-        self.con.raw_handle()
+        // HPCON is winapi's HANDLE (*mut winapi c_void); RawHandle is std's
+        // (*mut std c_void). Layout-identical raw pointers — cast to bridge the
+        // two distinct c_void types (they only diverge under our workspace's
+        // feature unification). [pocket-codex embedded-codex build patch]
+        self.con.raw_handle() as RawHandle
     }
 
     pub fn into_handles(self) -> (PsuedoCon, FileDescriptor, FileDescriptor) {
