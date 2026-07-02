@@ -112,6 +112,11 @@ async fn run_provider_auth_command(config: &ModelProviderAuthInfo) -> io::Result
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // All stdio is piped; when codex runs inside a GUI host process (no
+    // console), a console-subsystem auth command would otherwise flash a
+    // console window per token refresh.
+    #[cfg(windows)]
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
     let output = tokio::time::timeout(config.timeout(), command.output())
         .await

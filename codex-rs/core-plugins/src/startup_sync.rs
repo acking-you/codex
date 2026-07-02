@@ -1,3 +1,4 @@
+use crate::git_no_window_command;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
@@ -147,7 +148,7 @@ fn sync_openai_plugins_repo_via_git(codex_home: &Path, git_binary: &str) -> Resu
 
     let staged_repo_dir = prepare_curated_repo_parent_and_temp_dir(&repo_path)?;
     let clone_output = run_git_command_with_timeout(
-        Command::new(git_binary)
+        git_no_window_command(git_binary)
             .env("GIT_OPTIONAL_LOCKS", "0")
             .arg("clone")
             .arg("--depth")
@@ -467,7 +468,7 @@ fn read_local_git_or_sha_file(
 
 fn git_ls_remote_head_sha(git_binary: &str) -> Result<String, String> {
     let output = run_git_command_with_timeout(
-        Command::new(git_binary)
+        git_no_window_command(git_binary)
             .env("GIT_OPTIONAL_LOCKS", "0")
             .arg("ls-remote")
             .arg("https://github.com/openai/plugins.git")
@@ -493,7 +494,7 @@ fn git_ls_remote_head_sha(git_binary: &str) -> Result<String, String> {
 }
 
 fn git_head_sha(repo_path: &Path, git_binary: &str) -> Result<String, String> {
-    let output = Command::new(git_binary)
+    let output = git_no_window_command(git_binary)
         .env("GIT_OPTIONAL_LOCKS", "0")
         .arg("-C")
         .arg(repo_path)

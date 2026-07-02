@@ -10,7 +10,6 @@ use futures::future::join_all;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use tokio::process::Command;
 use tokio::time::Duration as TokioDuration;
 use tokio::time::timeout;
 use ts_rs::TS;
@@ -390,7 +389,7 @@ pub async fn git_diff_to_remote(cwd: &Path) -> Option<GitDiffToRemote> {
 
 /// Run a git command with a timeout to prevent blocking on large repositories
 async fn run_git_command_with_timeout(args: &[&str], cwd: &Path) -> Option<std::process::Output> {
-    let mut command = Command::new("git");
+    let mut command = crate::platform::git_command_async();
     command
         .env("GIT_OPTIONAL_LOCKS", "0")
         // Keep internal Git helper commands independent of configured hook directories.

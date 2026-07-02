@@ -59,3 +59,19 @@ pub use manager::PluginsManager;
 pub use manager::RemotePluginSyncResult;
 pub use marketplace_upgrade::ConfiguredMarketplaceUpgradeError as PluginMarketplaceUpgradeError;
 pub use marketplace_upgrade::ConfiguredMarketplaceUpgradeOutcome as PluginMarketplaceUpgradeOutcome;
+
+/// A git command whose output is captured (never interactive). On Windows the
+/// child is created with CREATE_NO_WINDOW: when codex runs inside a GUI host
+/// process (no console), an unflagged console-subsystem child would otherwise
+/// open a visible console window (e.g. the curated-plugins sync at session
+/// start).
+pub(crate) fn git_no_window_command(git_binary: &str) -> std::process::Command {
+    #[allow(unused_mut)]
+    let mut command = std::process::Command::new(git_binary);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    command
+}

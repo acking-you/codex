@@ -134,7 +134,7 @@ fn is_full_git_sha(value: &str) -> bool {
 }
 
 fn git_command() -> Command {
-    let mut command = Command::new("git");
+    let mut command = crate::git_no_window_command("git");
     command
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0");

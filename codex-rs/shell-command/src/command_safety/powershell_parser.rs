@@ -113,7 +113,8 @@ struct PowershellParserProcess {
 
 impl PowershellParserProcess {
     fn spawn(executable: &str) -> std::io::Result<Self> {
-        let mut child = Command::new(executable)
+        let mut command = Command::new(executable);
+        command
             .args([
                 "-NoLogo",
                 "-NoProfile",
@@ -123,8 +124,16 @@ impl PowershellParserProcess {
             ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()?;
+            .stderr(Stdio::null());
+        // Stdio is piped/null; when codex runs inside a GUI host process (no
+        // console), this long-lived parser would otherwise open a visible
+        // console window that lives as long as the session.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+        let mut child = command.spawn()?;
         let stdin = match take_child_stdin(&mut child) {
             Ok(stdin) => stdin,
             Err(error) => {

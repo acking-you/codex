@@ -39,7 +39,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 use std::sync::Arc;
 use tempfile::TempDir;
 use tracing::warn;
@@ -1188,7 +1187,7 @@ fn clone_git_plugin_source(
 }
 
 fn run_git(args: &[&str], cwd: Option<&Path>) -> Result<(), String> {
-    let mut command = Command::new("git");
+    let mut command = crate::git_no_window_command("git");
     command.args(args);
     command.env("GIT_TERMINAL_PROMPT", "0");
     if let Some(cwd) = cwd {
