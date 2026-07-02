@@ -261,6 +261,11 @@ impl LocalStdioServerLauncher {
             .args(args);
         #[cfg(unix)]
         command.process_group(0);
+        // MCP stdio is fully piped; when codex runs inside a GUI host process
+        // (no console), a console-subsystem server would otherwise open a
+        // visible console window at session start.
+        #[cfg(windows)]
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
         let (transport, stderr) = TokioChildProcess::builder(command)
             .stderr(Stdio::piped())
@@ -336,6 +341,7 @@ impl LocalProcessTerminator {
 
     #[cfg(windows)]
     fn terminate(&self) {
+        use std::os::windows::process::CommandExt;
         let _ = std::process::Command::new("taskkill")
             .arg("/PID")
             .arg(self.pid.to_string())
@@ -344,6 +350,9 @@ impl LocalProcessTerminator {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
+            // Nulled stdio; keep a GUI host (no console) from flashing a
+            // console window when an MCP server is torn down.
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
             .status();
     }
 

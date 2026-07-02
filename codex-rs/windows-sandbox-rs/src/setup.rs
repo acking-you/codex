@@ -210,6 +210,9 @@ fn run_setup_refresh_inner(
     // Refresh should never request elevation; ensure verb isn't set and we don't trigger UAC.
     let mut cmd = Command::new(&exe);
     cmd.arg(&b64).stdout(Stdio::null()).stderr(Stdio::null());
+    // Match run_setup_exe's non-elevated launch: without this, a GUI host
+    // process (no console) flashes a visible console window on every refresh.
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     let cwd = std::env::current_dir().unwrap_or_else(|_| request.codex_home.to_path_buf());
     log_note(
         &format!(

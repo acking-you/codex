@@ -146,6 +146,11 @@ async fn spawn_process_with_stdin_mode(
     }
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
+    // All stdio is piped; when codex runs inside a GUI host process (no
+    // console), a console-subsystem child would otherwise open a visible
+    // console window for every pipe-mode exec.
+    #[cfg(windows)]
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
     let mut child = command.spawn()?;
     let pid = child

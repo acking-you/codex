@@ -106,6 +106,9 @@ pub fn create_cwd_junction(requested_cwd: &Path, log_dir: Option<&Path>) -> Opti
         .raw_arg("/J")
         .raw_arg(&link_quoted)
         .raw_arg(&target_quoted)
+        // Output is captured; without this a host without a console (GUI app
+        // embedding codex) flashes a visible console window for the cmd child.
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
         .output()
     {
         Ok(output) => output,

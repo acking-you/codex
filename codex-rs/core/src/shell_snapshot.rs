@@ -289,6 +289,11 @@ async fn run_script_with_timeout(
     handler.args(&args[1..]);
     handler.stdin(Stdio::null());
     handler.current_dir(cwd);
+    // Snapshot output is piped; when codex runs inside a GUI host process (no
+    // console), a console-subsystem shell would otherwise open a visible
+    // console window on every session start.
+    #[cfg(windows)]
+    handler.creation_flags(0x08000000); // CREATE_NO_WINDOW
     #[cfg(unix)]
     unsafe {
         handler.pre_exec(|| {

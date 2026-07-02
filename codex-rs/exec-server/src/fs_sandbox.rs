@@ -298,6 +298,11 @@ fn spawn_command(
     command.stdin(std::process::Stdio::piped());
     command.stdout(std::process::Stdio::piped());
     command.stderr(std::process::Stdio::piped());
+    // All stdio is piped; when the exec server runs inside a GUI host process
+    // (no console), a console-subsystem child would otherwise open a visible
+    // console window per sandboxed fs command.
+    #[cfg(windows)]
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
     command.spawn().map_err(io_error)
 }
 

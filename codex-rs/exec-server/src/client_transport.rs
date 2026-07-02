@@ -139,5 +139,10 @@ fn stdio_command_process(stdio_command: &StdioExecServerCommand) -> Command {
     }
     #[cfg(unix)]
     command.process_group(0);
+    // The caller pipes all stdio; when codex runs inside a GUI host process
+    // (no console), a console-subsystem exec server would otherwise open a
+    // visible console window.
+    #[cfg(windows)]
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
     command
 }

@@ -113,6 +113,13 @@ pub(crate) async fn spawn_child_async(request: SpawnChildRequest<'_>) -> std::io
             cmd.stdin(Stdio::null());
 
             cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+            // Output is fully piped; when codex runs inside a GUI host process
+            // (no console), a console-subsystem child would otherwise open a
+            // visible console window for every tool call. Inherit mode is left
+            // untouched so terminal usage keeps sharing the parent console.
+            #[cfg(windows)]
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
         }
         StdioPolicy::Inherit => {
             // Inherit stdin, stdout, and stderr from the parent process.

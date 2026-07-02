@@ -197,12 +197,16 @@ fn kill_direct_child(child_process: &mut Child, action: &str) {
 
 #[cfg(windows)]
 fn kill_windows_process_tree(pid: u32) -> bool {
+    use std::os::windows::process::CommandExt;
     let pid = pid.to_string();
     match std::process::Command::new("taskkill")
         .args(["/PID", pid.as_str(), "/T", "/F"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
+        // All stdio is nulled; without this a host without a console (GUI app
+        // embedding codex) flashes a console window on every tree kill.
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
         .status()
     {
         Ok(status) => status.success(),
