@@ -59,6 +59,11 @@ pub fn notify_hook(argv: Vec<String>) -> Hook {
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null());
+                // All stdio is nulled; when codex runs inside a GUI host
+                // process (no console), a console-subsystem notify command
+                // would otherwise flash a console window at every turn end.
+                #[cfg(windows)]
+                command.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
                 match command.spawn() {
                     Ok(_) => HookResult::Success,

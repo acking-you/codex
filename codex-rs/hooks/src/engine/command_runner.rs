@@ -37,6 +37,11 @@ pub(crate) async fn run_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // All stdio is piped; when codex runs inside a GUI host process (no
+    // console), a console-subsystem hook handler would otherwise open a
+    // visible console window per hook run.
+    #[cfg(windows)]
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
     let mut child = match command.spawn() {
         Ok(child) => child,
