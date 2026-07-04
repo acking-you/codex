@@ -51,12 +51,3 @@ pub(crate) fn git_command() -> std::process::Command {
     }
     command
 }
-
-/// Async variant of [`git_command`].
-pub(crate) fn git_command_async() -> tokio::process::Command {
-    #[allow(unused_mut)]
-    let mut command = tokio::process::Command::new("git");
-    #[cfg(windows)]
-    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    command
-}
