@@ -42,8 +42,10 @@ compile_error!("codex-git symlink support is only implemented for Unix and Windo
 /// otherwise open a visible console window (e.g. the session-start git-info
 /// collection flashing a terminal).
 pub(crate) fn git_command() -> std::process::Command {
-    #[allow(unused_mut)]
     let mut command = std::process::Command::new("git");
+    // Upstream applies this to every git spawn: it keeps git from treating a
+    // bare repository it discovers as the working repo.
+    command.args(["-c", crate::SAFE_BARE_REPOSITORY_CONFIG]);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

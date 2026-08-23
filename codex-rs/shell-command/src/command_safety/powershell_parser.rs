@@ -125,6 +125,7 @@ impl PowershellParserProcess {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
+        codex_protocol::shell_environment::scrub_non_inheritable_env_vars(&mut command);
         // Stdio is piped/null; when codex runs inside a GUI host process (no
         // console), this long-lived parser would otherwise open a visible
         // console window that lives as long as the session.

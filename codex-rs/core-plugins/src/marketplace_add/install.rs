@@ -2,6 +2,7 @@ use super::MarketplaceAddError;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
 
 pub(super) fn clone_git_source(
     url: &str,
@@ -110,8 +111,10 @@ pub(super) fn marketplace_staging_root(install_root: &Path) -> PathBuf {
 }
 
 fn run_git(args: &[&str], cwd: Option<&Path>) -> Result<(), MarketplaceAddError> {
-    let mut command = crate::git_no_window_command("git");
-    command.args(args);
+    let mut command = Command::new("git");
+    command
+        .args(["-c", codex_git_utils::SAFE_BARE_REPOSITORY_CONFIG])
+        .args(args);
     command.env("GIT_TERMINAL_PROMPT", "0");
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
