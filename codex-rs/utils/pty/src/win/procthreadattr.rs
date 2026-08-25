@@ -21,9 +21,9 @@
 use super::psuedocon::HPCON;
 use anyhow::Error;
 use anyhow::ensure;
-use std::ffi::c_void;
 use std::io::Error as IoError;
 use std::mem;
+use std::os::windows::io::RawHandle;
 use std::ptr;
 use winapi::shared::minwindef::DWORD;
 use winapi::um::processthreadsapi::*;
@@ -75,7 +75,7 @@ impl ProcThreadAttributeList {
         unsafe {
             self.update(
                 PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-                con,
+                con.cast(),
                 mem::size_of::<HPCON>(),
             )
         }
@@ -97,7 +97,7 @@ impl ProcThreadAttributeList {
     unsafe fn update(
         &mut self,
         attribute: usize,
-        value: *mut c_void,
+        value: RawHandle,
         size: usize,
     ) -> Result<(), Error> {
         let res = unsafe {
@@ -105,7 +105,7 @@ impl ProcThreadAttributeList {
                 self.as_mut_ptr(),
                 0,
                 attribute,
-                value,
+                value.cast(),
                 size,
                 ptr::null_mut(),
                 ptr::null_mut(),
