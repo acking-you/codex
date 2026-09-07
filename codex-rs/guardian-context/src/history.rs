@@ -1,7 +1,7 @@
 //! Bounded, chronological review evidence independent of the parent's compaction.
 //!
 //! User messages and other entries have separate limits and keep their original order.
-//! Hosts append original items and reset this history on rollback or reconstruction.
+//! Hosts append original items, restore bounded checkpoints, and trim rolled-back turns.
 //! Clones share immutable payloads; eviction changes the generation so readers cannot
 //! reuse an offset into a different retained prefix. Prompt selection remains caller-owned.
 
@@ -10,6 +10,7 @@ use std::io;
 use std::io::Write;
 use std::sync::Arc;
 
+use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 
 use crate::SectionHistory;
@@ -46,7 +47,7 @@ impl TranscriptHistory {
     }
 
     /// Appends one original item, evicting only older entries of the same kind.
-    /// An item too large for its budget is skipped without changing retained entries.
+    /// Oversized user images fall back to bounded text; other oversized items are skipped.
     pub fn record(&mut self, item: &ResponseItem) {
         let mut size = BoundedSize {
             bytes: std::mem::size_of::<ResponseItem>(),
@@ -60,6 +61,51 @@ impl TranscriptHistory {
             Ok(())
         });
         if measured.is_err() {
+            if let ResponseItem::Message {
+                id,
+                role,
+                content,
+                phase,
+                internal_chat_message_metadata_passthrough,
+            } = item
+                && role == "user"
+                && content
+                    .iter()
+                    .any(|item| matches!(item, ContentItem::InputImage { .. }))
+            {
+                // Measure text and metadata before cloning, without copying image data.
+                size.bytes = std::mem::size_of::<ResponseItem>();
+                if serde_json::to_writer(
+                    &mut size,
+                    &(id, role, phase, internal_chat_message_metadata_passthrough),
+                )
+                .is_err()
+                {
+                    return;
+                }
+                let mut text = Vec::new();
+                for item in content.iter().filter(|item| {
+                    matches!(
+                        item,
+                        ContentItem::InputText { .. } | ContentItem::OutputText { .. }
+                    )
+                }) {
+                    if serde_json::to_writer(&mut size, item).is_err() {
+                        return;
+                    }
+                    text.push(item.clone());
+                }
+                if !text.is_empty() {
+                    self.record(&ResponseItem::Message {
+                        id: id.clone(),
+                        role: role.clone(),
+                        content: text,
+                        phase: phase.clone(),
+                        internal_chat_message_metadata_passthrough:
+                            internal_chat_message_metadata_passthrough.clone(),
+                    });
+                }
+            }
             return;
         }
         let is_user = item.is_user_message();
@@ -94,6 +140,19 @@ impl TranscriptHistory {
         for item in items {
             self.record(item);
         }
+    }
+
+    /// Removes a rolled-back boundary and everything after it. If retention already
+    /// evicted the boundary, discard the remaining evidence rather than keep later grants.
+    pub fn truncate_before(&mut self, boundary: &ResponseItem) {
+        let index = self.items.iter().position(|(item, _)| {
+            item.id()
+                .zip(boundary.id())
+                .is_some_and(|(item_id, boundary_id)| item_id == boundary_id)
+                || item.as_ref() == boundary
+        });
+        self.items.truncate(index.unwrap_or(0));
+        self.generation = self.generation.saturating_add(1);
     }
 
     /// Generation of the retained prefix, independent of parent compaction.

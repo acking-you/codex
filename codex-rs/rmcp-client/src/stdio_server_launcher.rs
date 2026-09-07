@@ -21,7 +21,6 @@ use std::os::windows::io::OwnedHandle;
 use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -56,7 +55,6 @@ use rmcp::service::RoleClient;
 use rmcp::service::RxJsonRpcMessage;
 use rmcp::service::TxJsonRpcMessage;
 use rmcp::transport::Transport;
-use rmcp::transport::child_process::TokioChildProcess;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
 use tokio::process::Command;
@@ -109,8 +107,7 @@ pub struct StdioServerTransport {
 }
 
 enum StdioServerTransportInner {
-    LocalLegacy(TokioChildProcess),
-    LocalModern(LocalStdioTransport),
+    Local(LocalStdioTransport),
     Executor(ExecutorProcessTransport),
 }
 
@@ -125,8 +122,7 @@ impl Transport<RoleClient> for StdioServerTransport {
         // wrapper keeps process placement private while leaving rmcp's send
         // semantics unchanged.
         match &mut self.inner {
-            StdioServerTransportInner::LocalLegacy(transport) => transport.send(item).boxed(),
-            StdioServerTransportInner::LocalModern(transport) => transport.send(item).boxed(),
+            StdioServerTransportInner::Local(transport) => transport.send(item).boxed(),
             StdioServerTransportInner::Executor(transport) => transport.send(item).boxed(),
         }
     }
@@ -136,8 +132,7 @@ impl Transport<RoleClient> for StdioServerTransport {
         // executor variant turns pushed process-output events back into the
         // line-delimited JSON stream expected by rmcp.
         match &mut self.inner {
-            StdioServerTransportInner::LocalLegacy(transport) => transport.receive().boxed(),
-            StdioServerTransportInner::LocalModern(transport) => transport.receive().boxed(),
+            StdioServerTransportInner::Local(transport) => transport.receive().boxed(),
             StdioServerTransportInner::Executor(transport) => transport.receive().boxed(),
         }
     }
@@ -145,8 +140,7 @@ impl Transport<RoleClient> for StdioServerTransport {
     async fn close(&mut self) -> std::result::Result<(), Self::Error> {
         self.process.terminate().await?;
         match &mut self.inner {
-            StdioServerTransportInner::LocalLegacy(transport) => transport.close().await,
-            StdioServerTransportInner::LocalModern(transport) => transport.close().await,
+            StdioServerTransportInner::Local(transport) => transport.close().await,
             StdioServerTransportInner::Executor(transport) => transport.close().await,
         }
     }
@@ -282,9 +276,6 @@ impl LocalStdioServerLauncher {
         let build_command = || {
             let mut command = Command::new(&resolved_program);
             command
-                .kill_on_drop(true)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
                 .current_dir(&cwd)
                 .env_clear()
                 .envs(&envs)
@@ -319,29 +310,14 @@ impl LocalStdioServerLauncher {
             Option<tokio::process::ChildStderr>,
             Option<u32>,
         )> {
-            match protocol_mode {
-                McpProtocolMode::Legacy => {
-                    let (transport, stderr) = TokioChildProcess::builder(command)
-                        .stderr(Stdio::piped())
-                        .spawn()?;
-                    let process_id = transport.id();
-                    Ok((
-                        StdioServerTransportInner::LocalLegacy(transport),
-                        stderr,
-                        process_id,
-                    ))
-                }
-                McpProtocolMode::V20260728 => {
-                    let (transport, stderr) =
-                        LocalStdioTransport::spawn(command, program_name.clone())?;
-                    let process_id = transport.id();
-                    Ok((
-                        StdioServerTransportInner::LocalModern(transport),
-                        stderr,
-                        process_id,
-                    ))
-                }
-            }
+            let (transport, stderr) =
+                LocalStdioTransport::spawn(command, program_name.clone(), protocol_mode)?;
+            let process_id = transport.id();
+            Ok((
+                StdioServerTransportInner::Local(transport),
+                stderr,
+                process_id,
+            ))
         };
         let (transport, stderr, process_id) = spawn_transport(command)?;
         #[cfg(windows)]
@@ -609,6 +585,7 @@ impl ExecutorStdioServerLauncher {
         // rmcp write JSON-RPC requests after the process starts.
         let started = exec_backend
             .start(ExecParams {
+                metadata: Default::default(),
                 process_id,
                 argv,
                 cwd,
