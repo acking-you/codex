@@ -25,6 +25,16 @@ The CLI entrypoint supports:
 - `--remote URL --environment-id ID [--name NAME]`
 - `forward --connect ws://HOST:PORT --remote URL --environment-id ID`
 
+## Authentication
+
+Direct WebSocket listeners support app-server's opt-in auth flags, including `--ws-auth capability-token --ws-token-sha256 HEX`, token files, and signed bearer tokens; clients send `Authorization: Bearer TOKEN` on each connection.
+Use a protected transport or TLS proxy for remote access; authentication is checked at connection time and these flags do not apply to stdio, remote registration, or forwarding.
+
+App-server clients can supply the raw token through `environment/add.authBearerToken` or `auth_bearer_token` in an `environments.toml` URL entry; omission preserves unauthenticated behavior.
+Tokens require `wss://` or a loopback destination, are redacted in diagnostics, and are reused on reconnect without automatic refresh.
+
+## Remote connections
+
 Remote mode registers the local exec-server with the environment registry,
 then reconnects to the service-provided rendezvous websocket as the environment.
 Remote communication uses the Noise relay contract; the registry and harness
@@ -193,6 +203,7 @@ Response:
   "environmentInfo": {
     "shell": { "name": "bash", "path": "/bin/bash" },
     "executorVersion": "1.2.3-alpha.4",
+    "providerId": "sha256:fb4f62da3e84f6864dcec8ede7bc66f1c96ecaeaf55f8a786b85df994057c8ac",
     "cwd": "file:///workspace"
   }
 }
@@ -202,6 +213,12 @@ Response:
 `environment/info`, so clients can use it without a second request.
 
 `executorVersion` is the executor's package release version, or `0.0.0` when unknown.
+
+The executor caches optional `providerId` at startup using
+`codex_build_info::build_id(commit, target)`, which CI can also call for an
+explicit build target. This opaque compatibility key excludes package version
+and requires no manifest. It identifies a standard build configuration, not exact
+executable bytes. Unstamped and legacy executors may omit it.
 
 Rust clients cache this metadata for the client's lifetime, including session
 resumption. If initialization omits it, the first metadata request fetches and

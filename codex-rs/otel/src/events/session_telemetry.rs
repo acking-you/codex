@@ -100,6 +100,7 @@ pub struct SessionTelemetryMetadata {
     pub(crate) account_id: Option<String>,
     pub(crate) account_email: Option<String>,
     pub(crate) originator: String,
+    pub(crate) product_sku: Option<&'static str>,
     pub(crate) service_name: Option<String>,
     pub(crate) session_source: String,
     pub(crate) model: String,
@@ -151,6 +152,23 @@ impl SessionTelemetry {
         self
     }
 
+    /// Attributes tool telemetry without turning arbitrary configuration into metric labels.
+    pub fn with_product_sku(mut self, product_sku: Option<&str>) -> Self {
+        const KNOWN_PRODUCT_SKUS: &[&str] = &["codex"];
+
+        self.metadata.product_sku = match product_sku {
+            None | Some("") => None,
+            Some(sku) => Some(
+                KNOWN_PRODUCT_SKUS
+                    .iter()
+                    .copied()
+                    .find(|known| *known == sku)
+                    .unwrap_or("other"),
+            ),
+        };
+        self
+    }
+
     pub fn with_metrics(mut self, metrics: MetricsClient) -> Self {
         self.metrics = Some(metrics);
         self.metrics_use_metadata_tags = true;
@@ -198,6 +216,29 @@ impl SessionTelemetry {
 
             let tags = self.tags_with_metadata(tags)?;
             metrics.histogram(name, value, &tags)
+        })();
+
+        if let Err(e) = res {
+            tracing::warn!("metrics histogram [{name}] failed: {e}");
+        }
+    }
+
+    /// Records a histogram with explicit buckets and the usual session attribution.
+    /// All callers of the same metric name must use the same boundaries.
+    pub fn histogram_with_boundaries(
+        &self,
+        name: &str,
+        value: i64,
+        boundaries: &[f64],
+        tags: &[(&str, &str)],
+    ) {
+        let res: MetricsResult<()> = (|| {
+            let Some(metrics) = &self.metrics else {
+                return Ok(());
+            };
+
+            let tags = self.tags_with_metadata(tags)?;
+            metrics.histogram_with_boundaries(name, value, boundaries, &tags)
         })();
 
         if let Err(e) = res {
@@ -499,6 +540,7 @@ impl SessionTelemetry {
                 account_id,
                 account_email,
                 originator: sanitize_metric_tag_value(originator.as_str()),
+                product_sku: None,
                 service_name: None,
                 session_source: session_source.to_string(),
                 model: model.to_owned(),
@@ -1187,10 +1229,13 @@ impl SessionTelemetry {
     ) {
         let flat_tool_name = tool_name.to_string();
         let success_str = if success { "true" } else { "false" };
-        let mut tags = Vec::with_capacity(2 + extra_tags.len());
+        let mut tags = Vec::with_capacity(3 + extra_tags.len());
         tags.push(("tool", flat_tool_name.as_str()));
         tags.push(("success", success_str));
         tags.extend_from_slice(extra_tags);
+        if let Some(product_sku) = self.metadata.product_sku {
+            tags.push(("product_sku", product_sku));
+        }
         self.counter(TOOL_CALL_COUNT_METRIC, /*inc*/ 1, &tags);
         self.record_duration(TOOL_CALL_DURATION_METRIC, duration, &tags);
         let mcp_server = trace_field_value(extra_trace_fields, "mcp_server").unwrap_or("");
