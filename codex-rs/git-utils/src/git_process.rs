@@ -29,11 +29,6 @@ impl Drop for KillGitProcessTreeOnDrop {
     }
 }
 
-/// pocket-codex: suppresses the console window a console-subsystem child
-/// would otherwise open when codex runs inside a GUI host with no console.
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
 fn spawn_git_command(command: &mut Command) -> Option<(Child, KillGitProcessTreeOnDrop)> {
     scrub_non_inheritable_env_vars(command.as_std_mut());
     #[cfg(unix)]
@@ -46,19 +41,7 @@ fn spawn_git_command(command: &mut Command) -> Option<(Child, KillGitProcessTree
         .stderr(Stdio::piped());
 
     #[cfg(windows)]
-    let (child, job) = match JobObject::create()
-        .and_then(|job| job.spawn_contained(command).map(|child| (child, job)))
-    {
-        Ok((child, job)) => (child, Some(job)),
-        Err(_) => {
-            // A failed contained spawn leaves CREATE_SUSPENDED on the command.
-            // pocket-codex: reset to CREATE_NO_WINDOW rather than 0 — git output
-            // here is always captured, and inside a GUI host process (no
-            // console) an unflagged console-subsystem child flashes a window.
-            command.creation_flags(CREATE_NO_WINDOW);
-            (command.spawn().ok()?, None)
-        }
-    };
+    let (child, job) = JobObject::spawn_background(command).ok()?;
     #[cfg(not(windows))]
     let child = command.spawn().ok()?;
 

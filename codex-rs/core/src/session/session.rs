@@ -1,5 +1,6 @@
 use super::input_queue::InputQueue;
 use super::mcp_refresh::McpRefresh;
+use super::retained_context::CodeModeMessageTasks;
 use super::step_context::StepContext;
 use super::step_settings::ModelInfoOverrides;
 use super::step_settings::StepSettings;
@@ -21,6 +22,7 @@ use crate::shell_snapshot::ShellSnapshot;
 use crate::shell_snapshot::SnapshotCredentialBrokerState;
 use crate::state::ActiveTurn;
 use crate::turn_metadata::ExecutionMetadata;
+use codex_analytics::ThreadProductUpdate;
 use codex_attachment_store::AttachmentStore;
 use codex_extension_api::ExtensionDataInit;
 use codex_http_client::ClientRouteClass;
@@ -64,6 +66,7 @@ pub(crate) struct Session {
     /// Orders accepted settings commits and their persisted events with compaction checkpoints.
     /// Keep this separate from `state` so storage I/O does not block runtime state access.
     pub(super) thread_settings_persistence: Semaphore,
+    pub(super) code_mode_message_tasks: CodeModeMessageTasks,
     /// Serializes rebuild/apply cycles for the running proxy; each cycle
     /// rebuilds from the current SessionState while holding this lock.
     pub(super) managed_network_proxy_refresh_lock: Semaphore,
@@ -834,17 +837,6 @@ impl Session {
             .parent_thread_id
             .or_else(|| initial_history.get_resumed_parent_thread_id());
         session_configuration.parent_thread_id = parent_thread_id;
-        if parent_thread_id.is_none() {
-            agent_control
-                .control()
-                .propagate_config_update(AgentConfigUpdate::ServiceTier(
-                    session_configuration
-                        .step_settings
-                        .service_tier
-                        .clone()
-                        .or_else(|| config.service_tier.clone()),
-                ));
-        }
         let is_paginated_subagent = matches!(
             session_configuration.history_mode,
             ThreadHistoryMode::Paginated
@@ -945,10 +937,28 @@ impl Session {
                         .effective_agent_max_threads(MultiAgentVersion::V2)
                         .unwrap_or(usize::MAX),
                 );
+                if parent_thread_id.is_none() {
+                    control.propagate_config_update(AgentConfigUpdate::ServiceTier(
+                        session_configuration
+                            .step_settings
+                            .service_tier
+                            .clone()
+                            .or_else(|| config.service_tier.clone()),
+                    ));
+                }
                 let runtime = control.runtime.clone();
                 (Arc::new(control), runtime)
             }
-            AgentControlInit::Inherited { control, runtime } => (control, runtime),
+            AgentControlInit::Provided { control, runtime } => {
+                let controller_id = control.identity();
+                if controller_id != session_id {
+                    return Err(CodexErr::InvalidRequest(format!(
+                        "agent controller identity {controller_id} does not match session identity {session_id}"
+                    ))
+                    .into());
+                }
+                (control, runtime)
+            }
         };
         let time_provider = crate::current_time::resolve_time_provider(
             config.current_time_reminder.as_ref(),
@@ -1418,6 +1428,7 @@ impl Session {
             } else {
                 ShellSnapshot::disabled()
             };
+            let inherited_environments = inherited_environments.unwrap_or_default();
             let turn_environments = Arc::new(ThreadEnvironments::new(
                 environment_manager,
                 default_shell.clone(),
@@ -1426,7 +1437,7 @@ impl Session {
                     session_configuration.windows_sandbox_type,
                 ),
                 shell_snapshot,
-                inherited_environments.unwrap_or_default(),
+                inherited_environments.clone(),
                 config.features.enabled(Feature::DeferredExecutor),
             ));
             turn_environments.update_selections(environment_selections);
@@ -1483,6 +1494,7 @@ impl Session {
                 initial_auto_compact_window_ids,
                 ContextManager::for_session(
                     &session_configuration.session_source,
+                    &config.features,
                 ),
             );
             state.base_instructions_provenance = base_instructions_provenance.clone();
@@ -1588,6 +1600,9 @@ impl Session {
             }
 
             let analytics_events_client = if config.analytics_enabled == Some(false) {
+                if let Some(client) = &analytics_events_client {
+                    client.update_thread_product_sku(thread_id, ThreadProductUpdate::Clear);
+                }
                 AnalyticsEventsClient::disabled()
             } else {
                 analytics_events_client.unwrap_or_else(|| {
@@ -1598,6 +1613,13 @@ impl Session {
                     )
                 })
             };
+            analytics_events_client.update_thread_product_sku(
+                thread_id,
+                match &config.apps_mcp_product_sku {
+                    Some(product) => ThreadProductUpdate::Set(product.clone()),
+                    None => ThreadProductUpdate::Clear,
+                },
+            );
             for item in initial_history.get_rollout_items() {
                 match item {
                     RolloutItem::Compacted(compacted) => {
@@ -1728,6 +1750,7 @@ impl Session {
                     workspace_routing.as_ref().clone(),
                     extensions.model_request_contributors().to_vec(),
                 )
+                .with_executed_tool_calls(executed_tool_calls.clone())
                 .with_restored_history(matches!(
                     &initial_history,
                     InitialHistory::Resumed(_) | InitialHistory::Forked(_)
@@ -1759,6 +1782,7 @@ impl Session {
                 agent_status,
                 state: Mutex::new(state),
                 thread_settings_persistence: Semaphore::new(/*permits*/ 1),
+                code_mode_message_tasks: CodeModeMessageTasks::default(),
                 managed_network_proxy_refresh_lock: Semaphore::new(/*permits*/ 1),
                 features: config.features.clone(),
                 isolation,
@@ -1872,7 +1896,12 @@ impl Session {
             )
             .await?;
             sess.start_mcp_prewarm_worker(mcp_prewarm_rx, mcp_auth_changes);
-            sess.schedule_startup_prewarm().await;
+            sess.follow_inherited_environment_configurations(
+                &inherited_environments,
+                &session_configuration.environments,
+            );
+            sess.schedule_startup_prewarm(super::startup_prewarm::PrewarmInput::Base)
+                .await;
             let session_start_source = match &initial_history {
                 InitialHistory::Forked(_) if forked_from_id.is_some() => {
                     codex_hooks::SessionStartSource::Fork

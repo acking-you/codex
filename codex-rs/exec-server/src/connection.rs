@@ -253,7 +253,7 @@ fn kill_direct_child(child_process: &mut Child, action: &str) {
 fn kill_windows_process_tree(pid: u32) -> bool {
     use std::os::windows::process::CommandExt;
     let pid = pid.to_string();
-    match std::process::Command::new("taskkill")
+    match codex_utils_process::background_command("taskkill")
         .args(["/PID", pid.as_str(), "/T", "/F"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())

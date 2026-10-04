@@ -122,16 +122,13 @@ impl JobObject {
         }
     }
 
-    /// Prevents a child from running before it can be assigned to this job.
+    /// Prepares a background child to be assigned to this job before it runs.
+    ///
+    /// Replaces all creation flags with `CREATE_SUSPENDED | CREATE_NO_WINDOW`.
+    /// Interactive children that need to inherit a console require an explicit launch.
     pub fn prepare_suspended_spawn(&self, command: &mut Command) {
-        // pocket-codex: OR in CREATE_NO_WINDOW rather than setting flags bare.
-        // `creation_flags` REPLACES the whole mask, so a caller that had asked
-        // for CREATE_NO_WINDOW lost it here — and every contained spawn (git
-        // info, MCP stdio servers) then flashed a console window when codex runs
-        // inside a GUI host process with no console. These spawns are always
-        // fully piped, so suppressing the window is safe for all of them.
         command
-            .creation_flags(CREATE_SUSPENDED | CREATE_NO_WINDOW)
+            .creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED)
             .kill_on_drop(true);
     }
 
@@ -174,7 +171,29 @@ impl JobObject {
         }
     }
 
-    /// Starts a process only after assigning it to this Job Object.
+    /// Starts a console-free background process, falling back when containment is unavailable.
+    /// The returned job owns the contained process tree when assignment succeeds.
+    pub fn spawn_background(command: &mut Command) -> io::Result<(Child, Option<Self>)> {
+        Self::spawn_background_with_job(command, Self::create())
+    }
+
+    fn spawn_background_with_job(
+        command: &mut Command,
+        job: io::Result<Self>,
+    ) -> io::Result<(Child, Option<Self>)> {
+        match job.and_then(|job| job.spawn_contained(command).map(|child| (child, job))) {
+            Ok((child, job)) => Ok((child, Some(job))),
+            Err(_) => {
+                // Remove suspension before retrying, including after failed assignment.
+                command.creation_flags(CREATE_NO_WINDOW).kill_on_drop(true);
+                command.spawn().map(|child| (child, None))
+            }
+        }
+    }
+
+    /// Starts a background child without a console, assigning it to this job before it runs.
+    ///
+    /// Replaces existing creation flags as in [`Self::prepare_suspended_spawn`].
     pub fn spawn_contained(&self, command: &mut Command) -> io::Result<Child> {
         self.prepare_suspended_spawn(command);
         let child = command.spawn()?;
@@ -239,3 +258,7 @@ impl AsRawHandle for JobObject {
         self.handle.as_raw_handle()
     }
 }
+
+#[cfg(test)]
+#[path = "job_tests.rs"]
+mod tests;

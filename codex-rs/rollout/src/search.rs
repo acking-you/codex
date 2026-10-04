@@ -71,13 +71,7 @@ async fn ripgrep_rollout_paths(
         return Ok(Some(HashSet::new()));
     }
 
-    let mut command = Command::new(rg_command);
-    // Output is captured; when codex runs inside a GUI host process (no
-    // console), an unflagged console child would flash a console window per
-    // history search.
-    #[cfg(windows)]
-    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    let output = match command
+    let output = match Command::from(codex_utils_process::background_command(rg_command))
         .arg("-l")
         .arg("--fixed-strings")
         .arg("--ignore-case")
