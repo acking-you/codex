@@ -7,7 +7,7 @@ use tokio::time::Instant;
 
 #[derive(Debug)]
 pub enum GuardianReviewOutcome {
-    /// Approved by current async evidence after the redundant attempt was drained.
+    /// Approved by current async evidence; the redundant attempt is cancelled and drained.
     CachedApproval,
     Completed(GuardianAssessment),
     Error(GuardianReviewError),
@@ -96,7 +96,7 @@ impl From<GuardianReviewSessionOutcome> for GuardianReviewOutcome {
     fn from(outcome: GuardianReviewSessionOutcome) -> Self {
         match outcome {
             GuardianReviewSessionOutcome::Completed(Ok(Some(message))) => {
-                match crate::parse_guardian_assessment(Some(&message)) {
+                match crate::parse_guardian_assessment(&message) {
                     Ok(assessment) => Self::Completed(assessment),
                     Err(error) => Self::Error(GuardianReviewError::parse(error)),
                 }
